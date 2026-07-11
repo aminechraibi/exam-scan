@@ -60,7 +60,7 @@ class ExamRepository(
         val token=System.currentTimeMillis(); val original=File(dir,"page_${pageNo}_${token}_original.jpg")
         context.contentResolver.openInputStream(uri)!!.use{input->original.outputStream().use{input.copyTo(it)}}
         val labeled=File(dir,"page_${pageNo}_${token}_labeled.jpg")
-        labelBitmap(original,labeled,"Paper $paperNo")
+        labelBitmap(original,labeled,ExamFileRules.paperLabel(paperNo))
         return original.absolutePath to labeled.absolutePath
     }
     private fun labelBitmap(input:File,output:File,label:String){
@@ -75,13 +75,13 @@ class ExamRepository(
     }
     private suspend fun relabelPaper(paper:PaperEntity){
         pages.getForPaper(paper.id).forEach{p->
-            val out=File(p.labeledPath); labelBitmap(File(p.originalPath),out,"Paper ${paper.paperNumber}")
+            val out=File(p.labeledPath); labelBitmap(File(p.originalPath),out,ExamFileRules.paperLabel(paper.paperNumber))
         }
         papers.update(paper.copy(updatedAt=System.currentTimeMillis()))
     }
     suspend fun exportPdf(examId:Long):Uri=withContext(Dispatchers.IO){
         val exam=exams.get(examId)?:error("Exam not found"); val all=papers.getForExam(examId)
-        val dir=File(context.cacheDir,"exports").apply{mkdirs()}; val file=File(dir,ExamFileRules.safeFileName(exam.name)+"_${exam.examDate}.pdf")
+        val dir=File(context.cacheDir,"exports").apply{mkdirs()}; val file=ExamFileRules.uniqueFile(dir,ExamFileRules.safeFileName(exam.name)+"_${exam.examDate}.pdf")
         val doc=PdfDocument(); var index=1
         all.forEach{pw->pw.pages.sortedBy{it.pageNumber}.forEach{p->
             val bm=BitmapFactory.decodeFile(p.labeledPath)?:return@forEach
@@ -89,10 +89,11 @@ class ExamRepository(
             val scale=minOf(1240f/bm.width,1754f/bm.height); val w=bm.width*scale;val h=bm.height*scale
             c.drawColor(Color.WHITE); c.drawBitmap(bm,null,RectF((1240-w)/2,(1754-h)/2,(1240+w)/2,(1754+h)/2),Paint(Paint.FILTER_BITMAP_FLAG)); doc.finishPage(page);bm.recycle()
         }}
+        if(index==1){doc.close();error("Exam has no scanned pages")}
         file.outputStream().use{doc.writeTo(it)};doc.close(); uri(file)
     }
     suspend fun exportImagesZip(examId:Long):Uri=withContext(Dispatchers.IO){
-        val exam=exams.get(examId)?:error("Exam not found");val all=papers.getForExam(examId);val dir=File(context.cacheDir,"exports").apply{mkdirs()};val file=File(dir,ExamFileRules.safeFileName(exam.name)+"_${exam.examDate}_images.zip")
+        val exam=exams.get(examId)?:error("Exam not found");val all=papers.getForExam(examId);val dir=File(context.cacheDir,"exports").apply{mkdirs()};val file=ExamFileRules.uniqueFile(dir,ExamFileRules.safeFileName(exam.name)+"_${exam.examDate}_images.zip")
         ZipOutputStream(BufferedOutputStream(file.outputStream())).use{zip->all.forEach{pw->pw.pages.sortedBy{it.pageNumber}.forEach{p->val src=File(p.labeledPath);zip.putNextEntry(ZipEntry("Paper_%03d/Page_%02d.jpg".format(pw.paper.paperNumber,p.pageNumber)));src.inputStream().use{it.copyTo(zip)};zip.closeEntry()}}};uri(file)
     }
     private fun uri(file:File)=FileProvider.getUriForFile(context,"${context.packageName}.files",file)

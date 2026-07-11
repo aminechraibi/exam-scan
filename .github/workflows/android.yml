@@ -49,7 +49,11 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
-          script: ./gradlew connectedDebugAndroidTest --stacktrace
+          script: |
+            ./gradlew connectedDebugAndroidTest assembleDebug --stacktrace
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n com.example.examscan.debug/com.example.examscan.MainActivity
+            adb shell pidof com.example.examscan.debug
       - uses: actions/upload-artifact@v4
         if: always()
         with:
