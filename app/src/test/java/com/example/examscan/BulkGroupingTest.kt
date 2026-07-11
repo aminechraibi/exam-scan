@@ -1,4 +1,5 @@
 package com.example.examscan
+import com.example.examscan.data.ExamFileRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
