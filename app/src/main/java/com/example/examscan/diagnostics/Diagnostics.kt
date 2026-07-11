@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.StatFs
 import androidx.core.content.FileProvider
 import com.example.examscan.BuildConfig
@@ -16,8 +18,13 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 
 enum class DiagnosticCategory(val title: String) {
+    RUNTIME("App exceptions and freezes"),
     ML_KIT("Physical-phone ML Kit"),
     DOCUMENT_QUALITY("Real document quality"),
     STORAGE("Storage and low-space"),
@@ -30,10 +37,20 @@ object Diagnostics {
     private const val PREFS = "diagnostic_settings"
     private const val ENABLED = "enabled"
     private const val MAX_BYTES = 1_000_000L
+    private const val SESSION_ACTIVE = "session_active"
     private lateinit var app: Application
+    private val writer = Executors.newSingleThreadExecutor { Thread(it, "ExamScan-Diagnostics") }
+    private val watchdog = Executors.newSingleThreadScheduledExecutor { Thread(it, "ExamScan-Watchdog") }
+    private val mainHeartbeat = AtomicLong(System.currentTimeMillis())
+    private val stallReported = AtomicBoolean(false)
 
     fun initialize(application: Application) {
         app = application
+        val prefs = application.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val previousSessionInterrupted = prefs.getBoolean(SESSION_ACTIVE, false)
+        prefs.edit().putBoolean(SESSION_ACTIVE, true).apply()
+        installExceptionHandler()
+        startMainThreadWatchdog()
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityCreated(activity: Activity, state: Bundle?) = log(DiagnosticCategory.LIFECYCLE, "activity_created", mapOf("restored" to (state != null)))
             override fun onActivityStarted(activity: Activity) = log(DiagnosticCategory.LIFECYCLE, "activity_started")
@@ -44,6 +61,7 @@ object Diagnostics {
             override fun onActivityDestroyed(activity: Activity) = log(DiagnosticCategory.LIFECYCLE, "activity_destroyed", mapOf("changing_configuration" to activity.isChangingConfigurations))
         })
         log(DiagnosticCategory.RELEASE, "app_started", deviceSnapshot())
+        if (previousSessionInterrupted) log(DiagnosticCategory.RUNTIME, "previous_process_ended_without_shutdown", runtimeSnapshot())
     }
 
     fun isEnabled(context: Context = app): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ENABLED, false)
@@ -51,10 +69,28 @@ object Diagnostics {
     fun isCategoryEnabled(category: DiagnosticCategory): Boolean = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(category.name, true)
     fun setCategoryEnabled(category: DiagnosticCategory, enabled: Boolean) { app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(category.name, enabled).apply() }
 
-    @Synchronized fun log(category: DiagnosticCategory, event: String, details: Map<String, Any?> = emptyMap(), error: Throwable? = null) {
+    fun log(category: DiagnosticCategory, event: String, details: Map<String, Any?> = emptyMap(), error: Throwable? = null) {
         if (!::app.isInitialized || !isEnabled() || !isCategoryEnabled(category)) return
-        rotateIfNeeded()
-        val record = JSONObject().apply {
+        val record = createRecord(category, event, details, error)
+        writer.execute { writeNow(record) }
+    }
+
+    fun operationStarted(category: DiagnosticCategory, operation: String, details: Map<String, Any?> = emptyMap()): Long {
+        val id = System.nanoTime()
+        log(category, "operation_started", details + mapOf("operation" to operation, "operation_id" to id))
+        return id
+    }
+
+    fun operationFinished(category: DiagnosticCategory, operation: String, id: Long, startedAtMillis: Long, details: Map<String, Any?> = emptyMap()) {
+        val duration = System.currentTimeMillis() - startedAtMillis
+        log(category, if (duration >= 3000) "slow_operation_finished" else "operation_finished", details + mapOf("operation" to operation, "operation_id" to id, "duration_ms" to duration) + runtimeSnapshot())
+    }
+
+    fun operationFailed(category: DiagnosticCategory, operation: String, id: Long, startedAtMillis: Long, error: Throwable) {
+        log(category, "operation_failed", mapOf("operation" to operation, "operation_id" to id, "duration_ms" to (System.currentTimeMillis() - startedAtMillis)) + runtimeSnapshot(), error)
+    }
+
+    private fun createRecord(category: DiagnosticCategory, event: String, details: Map<String, Any?>, error: Throwable?): String = JSONObject().apply {
             put("timestamp", utcNow())
             put("category", category.name)
             put("event", event.take(80))
@@ -62,14 +98,14 @@ object Diagnostics {
             error?.let {
                 put("error_type", it.javaClass.simpleName.take(80))
                 put("error_message", sanitize(it.message))
+                put("stack_trace", sanitize(it.stackTraceToString()))
             }
-        }
-        logFile().appendText(record.toString() + "\n")
-    }
+        }.toString()
 
     fun checkpoint(category: DiagnosticCategory) = log(category, "manual_checkpoint", deviceSnapshot())
 
     fun exportUri(): Uri {
+        flush()
         val exportDir = File(app.cacheDir, "diagnostics").apply { mkdirs() }
         val export = File(exportDir, "ExamScan-diagnostics-${System.currentTimeMillis()}.jsonl")
         val header = JSONObject(mapOf("type" to "diagnostic_header", "generated_at" to utcNow(), "device" to JSONObject(deviceSnapshot()))).toString()
@@ -78,8 +114,8 @@ object Diagnostics {
         return FileProvider.getUriForFile(app, "${app.packageName}.files", export)
     }
 
-    fun clear() { logFile().delete() }
-    fun logSize(): Long = logFile().takeIf { it.exists() }?.length() ?: 0
+    fun clear() { flush(); logFile().delete(); File(logFile().parentFile,"events.previous.jsonl").delete() }
+    fun logSize(): Long { flush(); return logFile().takeIf { it.exists() }?.length() ?: 0 }
 
     fun share(context: Context) {
         val uri = exportUri()
@@ -109,6 +145,43 @@ object Diagnostics {
             "total_storage_bytes" to stat.totalBytes
         )
     }
+
+    fun runtimeSnapshot(): Map<String, Any?> {
+        val runtime = Runtime.getRuntime()
+        val stat = StatFs(app.filesDir.absolutePath)
+        return mapOf(
+            "heap_used_bytes" to (runtime.totalMemory() - runtime.freeMemory()),
+            "heap_free_bytes" to runtime.freeMemory(),
+            "heap_max_bytes" to runtime.maxMemory(),
+            "available_storage_bytes" to stat.availableBytes,
+            "thread_count" to Thread.getAllStackTraces().size
+        )
+    }
+
+    private fun installExceptionHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            if (isEnabled() && isCategoryEnabled(DiagnosticCategory.RUNTIME)) {
+                writeNow(createRecord(DiagnosticCategory.RUNTIME,"uncaught_exception",runtimeSnapshot()+mapOf("thread" to thread.name),error))
+            }
+            previous?.uncaughtException(thread,error)
+        }
+    }
+
+    private fun startMainThreadWatchdog() {
+        val main = Handler(Looper.getMainLooper())
+        watchdog.scheduleAtFixedRate({
+            main.post { mainHeartbeat.set(System.currentTimeMillis()); if(stallReported.getAndSet(false)) log(DiagnosticCategory.RUNTIME,"main_thread_recovered",runtimeSnapshot()) }
+            val delay = System.currentTimeMillis() - mainHeartbeat.get()
+            if(delay >= 5000 && stallReported.compareAndSet(false,true)) {
+                val stack = Looper.getMainLooper().thread.stackTrace.joinToString("\n").take(6000)
+                log(DiagnosticCategory.RUNTIME,"main_thread_stall",runtimeSnapshot()+mapOf("blocked_ms" to delay,"main_thread_stack" to stack))
+            }
+        },2,2,TimeUnit.SECONDS)
+    }
+
+    @Synchronized private fun writeNow(record: String) { rotateIfNeeded(); logFile().appendText(record+"\n") }
+    private fun flush() { if(::app.isInitialized) writer.submit {}.get(5,TimeUnit.SECONDS) }
 
     private fun sanitize(value: Any?): Any = when (value) {
         null -> JSONObject.NULL

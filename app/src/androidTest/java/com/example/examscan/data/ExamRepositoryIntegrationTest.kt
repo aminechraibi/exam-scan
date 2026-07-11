@@ -59,6 +59,16 @@ class ExamRepositoryIntegrationTest {
         }
     }
 
+    @Test fun successiveBulkBatchesFillIncompletePaperBeforeCreatingNext() = runBlocking {
+        val examId = repository.createExam("Continuous bulk", "2026-07-11", 2)
+        repository.addBulk(examId, 2, imageUris(3, "batch_one"))
+        repository.addBulk(examId, 2, imageUris(2, "batch_two"))
+        val result = db.paperDao().getForExam(examId)
+        assertEquals(listOf(1, 2, 3), result.map { it.paper.paperNumber })
+        assertEquals(listOf(2, 2, 1), result.map { it.pages.size })
+        assertEquals(listOf(1, 2), result[1].pages.map { it.pageNumber })
+    }
+
     @Test fun deleteInsertAndRetakeKeepPositionsAndCleanOldFiles() = runBlocking {
         val examId = repository.createExam("Physics", "2026-07-11", 3)
         val paperId = repository.addSinglePaper(examId, imageUris(3))

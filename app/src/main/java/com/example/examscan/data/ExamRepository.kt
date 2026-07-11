@@ -29,11 +29,14 @@ class ExamRepository(
     suspend fun deletePaper(p:PaperEntity)=withContext(Dispatchers.IO){ File(context.filesDir,"scans/exam_${p.examId}/paper_${p.paperNumber}").deleteRecursively(); papers.delete(p) }
 
     suspend fun addSinglePaper(examId:Long, uris:List<Uri>): Long = withContext(Dispatchers.IO) {
+        val started=System.currentTimeMillis();val operationId=Diagnostics.operationStarted(DiagnosticCategory.STORAGE,"save_paper",mapOf("page_count" to uris.size))
         val n=papers.nextNumber(examId); val pid=papers.insert(PaperEntity(examId=examId,paperNumber=n))
         try {
             uris.forEachIndexed { i,u -> savePage(examId,pid,n,i+1,u) }
+            Diagnostics.operationFinished(DiagnosticCategory.STORAGE,"save_paper",operationId,started,mapOf("page_count" to uris.size))
             pid
         } catch (failure: Throwable) {
+            Diagnostics.operationFailed(DiagnosticCategory.STORAGE,"save_paper",operationId,started,failure)
             Diagnostics.log(DiagnosticCategory.STORAGE,"paper_import_rolled_back",mapOf("page_count" to uris.size),failure)
             File(context.filesDir,"scans/exam_$examId/paper_$n").deleteRecursively()
             papers.get(pid)?.let { papers.delete(it) }
@@ -41,7 +44,15 @@ class ExamRepository(
         }
     }
     suspend fun addBulk(examId:Long, pagesPerPaper:Int, uris:List<Uri>): List<Long> = withContext(Dispatchers.IO) {
-        val ids=mutableListOf<Long>(); ExamFileRules.groupPages(uris,pagesPerPaper).forEach { group -> ids += addSinglePaper(examId,group) }; ids
+        require(pagesPerPaper > 0)
+        val ids=mutableListOf<Long>();val remaining=uris.toMutableList()
+        val last=papers.getForExam(examId).maxByOrNull{it.paper.paperNumber}
+        if(last!=null&&last.pages.size<pagesPerPaper&&remaining.isNotEmpty()){
+            val fill=minOf(pagesPerPaper-last.pages.size,remaining.size)
+            repeat(fill){index->savePage(examId,last.paper.id,last.paper.paperNumber,last.pages.size+index+1,remaining.removeAt(0))}
+            ids+=last.paper.id
+        }
+        ExamFileRules.groupPages(remaining,pagesPerPaper).forEach { group -> ids += addSinglePaper(examId,group) };ids
     }
     suspend fun replacePage(pageId:Long, uri:Uri)=withContext(Dispatchers.IO){
         val old=pages.get(pageId)?:return@withContext; val paper=papers.get(old.paperId)?:return@withContext
@@ -79,6 +90,7 @@ class ExamRepository(
         }
     }
     private fun copyAndLabel(uri:Uri,examId:Long,paperNo:Int,pageNo:Int):Pair<String,String>{
+        val started=System.currentTimeMillis();val operationId=Diagnostics.operationStarted(DiagnosticCategory.STORAGE,"copy_and_label_page",mapOf("page_number" to pageNo))
         val dir=File(context.filesDir,"scans/exam_$examId/paper_$paperNo").apply{mkdirs()}
         val token=System.currentTimeMillis(); val original=File(dir,"page_${pageNo}_${token}_original.jpg")
         val labeled=File(dir,"page_${pageNo}_${token}_labeled.jpg")
@@ -86,8 +98,10 @@ class ExamRepository(
             val input = context.contentResolver.openInputStream(uri) ?: error("Cannot open scan")
             input.use{source->original.outputStream().use{source.copyTo(it)}}
             labelBitmap(original,labeled,ExamFileRules.paperLabel(paperNo))
+            Diagnostics.operationFinished(DiagnosticCategory.STORAGE,"copy_and_label_page",operationId,started,mapOf("input_bytes" to original.length(),"output_bytes" to labeled.length(),"page_number" to pageNo))
             return original.absolutePath to labeled.absolutePath
         } catch (failure: Throwable) {
+            Diagnostics.operationFailed(DiagnosticCategory.STORAGE,"copy_and_label_page",operationId,started,failure)
             Diagnostics.log(DiagnosticCategory.STORAGE,"image_write_failed",error=failure)
             original.delete(); labeled.delete()
             throw failure
