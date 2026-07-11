@@ -69,6 +69,25 @@ class ExamRepositoryIntegrationTest {
         assertEquals(listOf(1, 2), result[1].pages.map { it.pageNumber })
     }
 
+    @Test fun paperPageLimitRejectsExtraPagesButAllowsRetakeAndDelete() = runBlocking {
+        val examId = repository.createExam("Limited", "2026-07-11", 2)
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { repository.addSinglePaper(examId, imageUris(3, "too_many")) }
+        }
+        assertTrue(db.paperDao().getForExam(examId).isEmpty())
+        val paperId = repository.addSinglePaper(examId, imageUris(2, "full"))
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { repository.insertPage(paperId, 2, imageUris(1, "extra").single()) }
+        }
+        var current = db.pageDao().getForPaper(paperId)
+        assertEquals(2, current.size)
+        repository.replacePage(current[0].id, imageUris(1, "allowed_retake").single())
+        current = db.pageDao().getForPaper(paperId)
+        assertEquals(2, current.size)
+        repository.deletePage(current[1])
+        assertEquals(1, db.pageDao().getForPaper(paperId).size)
+    }
+
     @Test fun deleteInsertAndRetakeKeepPositionsAndCleanOldFiles() = runBlocking {
         val examId = repository.createExam("Physics", "2026-07-11", 3)
         val paperId = repository.addSinglePaper(examId, imageUris(3))

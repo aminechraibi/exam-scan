@@ -29,6 +29,9 @@ class ExamRepository(
     suspend fun deletePaper(p:PaperEntity)=withContext(Dispatchers.IO){ File(context.filesDir,"scans/exam_${p.examId}/paper_${p.paperNumber}").deleteRecursively(); papers.delete(p) }
 
     suspend fun addSinglePaper(examId:Long, uris:List<Uri>): Long = withContext(Dispatchers.IO) {
+        val expected=exams.get(examId)?.pagesPerPaper?:error("Exam not found")
+        require(uris.isNotEmpty()){ "A paper must contain at least one page" }
+        require(uris.size<=expected){ "Paper is limited to $expected page(s)" }
         val started=System.currentTimeMillis();val operationId=Diagnostics.operationStarted(DiagnosticCategory.STORAGE,"save_paper",mapOf("page_count" to uris.size))
         val n=papers.nextNumber(examId); val pid=papers.insert(PaperEntity(examId=examId,paperNumber=n))
         try {
@@ -70,6 +73,8 @@ class ExamRepository(
     suspend fun insertPage(paperId:Long,afterPage:Int,uri:Uri)=withContext(Dispatchers.IO){
         val paper=papers.get(paperId)?:return@withContext
         val current=pages.getForPaper(paperId)
+        val expected=exams.get(paper.examId)?.pagesPerPaper?:error("Exam not found")
+        require(current.size<expected){ "Paper already has its maximum of $expected page(s)" }
         current.filter{it.pageNumber>afterPage}.sortedByDescending{it.pageNumber}.forEach{ pages.update(it.copy(pageNumber=it.pageNumber+1)) }
         savePage(paper.examId,paper.id,paper.paperNumber,afterPage+1,uri)
         relabelPaper(paper)
