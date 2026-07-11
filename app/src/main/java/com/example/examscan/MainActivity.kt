@@ -5,6 +5,7 @@ import android.content.*
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -68,7 +69,7 @@ class MainActivity:ComponentActivity(){
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun ExamScreen(vm:AppViewModel,nav:NavHostController,examId:Long){
-    val exam by vm.exam(examId).collectAsState(initial=null);val papers by vm.papers(examId).collectAsState(initial=emptyList());val activity=androidx.compose.ui.platform.LocalContext.current as Activity;val scope=rememberCoroutineScope();var menu by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)}
+    val exam by vm.exam(examId).collectAsState(initial=null);val papers by vm.papers(examId).collectAsState(initial=emptyList());val activity=LocalActivity.current ?: return;val scope=rememberCoroutineScope();var menu by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)}
     var pending by remember{mutableStateOf<ScanMode?>(null)}
     val launcher=rememberLauncherForActivityResult(StartIntentSenderForResult()){r->if(r.resultCode==Activity.RESULT_OK){val result=GmsDocumentScanningResult.fromActivityResultIntent(r.data);val uris=result?.pages?.map{it.imageUri}.orEmpty();val e=exam;if(e!=null&&uris.isNotEmpty()){when(pending){ScanMode.Single->vm.addSingle(examId,uris);ScanMode.Bulk->vm.addBulk(examId,e.pagesPerPaper,uris);null->{}}}}}
     fun scan(mode:ScanMode){val e=exam?:return;pending=mode;val limit=if(mode==ScanMode.Single)e.pagesPerPaper else 200;val options=GmsDocumentScannerOptions.Builder().setGalleryImportAllowed(true).setPageLimit(limit).setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG).setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL).build();GmsDocumentScanning.getClient(options).getStartScanIntent(activity).addOnSuccessListener{launcher.launch(IntentSenderRequest.Builder(it).build())}.addOnFailureListener{error=it.message?:"Scanner unavailable"}}
@@ -84,7 +85,7 @@ enum class ScanMode{Single,Bulk}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun PaperScreen(vm:AppViewModel,nav:NavHostController,paperId:Long,expected:Int){
-    val pages by vm.pages(paperId).collectAsState(initial=emptyList());val activity=androidx.compose.ui.platform.LocalContext.current as Activity;var action by remember{mutableStateOf<PageAction?>(null)};var error by remember{mutableStateOf<String?>(null)}
+    val pages by vm.pages(paperId).collectAsState(initial=emptyList());val activity=LocalActivity.current ?: return;var action by remember{mutableStateOf<PageAction?>(null)};var error by remember{mutableStateOf<String?>(null)}
     val launcher=rememberLauncherForActivityResult(StartIntentSenderForResult()){r->if(r.resultCode==Activity.RESULT_OK){GmsDocumentScanningResult.fromActivityResultIntent(r.data)?.pages?.firstOrNull()?.imageUri?.let{u->when(val a=action){is PageAction.Replace->vm.replace(a.id,u);is PageAction.Insert->vm.insert(paperId,a.after,u);null->{}}}}}
     fun scan(a:PageAction){action=a;val options=GmsDocumentScannerOptions.Builder().setGalleryImportAllowed(true).setPageLimit(1).setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG).setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL).build();GmsDocumentScanning.getClient(options).getStartScanIntent(activity).addOnSuccessListener{launcher.launch(IntentSenderRequest.Builder(it).build())}.addOnFailureListener{error=it.message}}
     Scaffold(topBar={TopAppBar(title={Column{Text("Paper editor",fontWeight=FontWeight.Bold);Text("${pages.size}/$expected pages",style=MaterialTheme.typography.labelSmall)}},navigationIcon={IconButton({nav.popBackStack()}){Icon(Icons.Default.ArrowBack,null)}})},floatingActionButton={ExtendedFloatingActionButton(text={Text("Add page")},icon={Icon(Icons.Default.Add,null)},onClick={scan(PageAction.Insert(pages.size))})}){pad->
