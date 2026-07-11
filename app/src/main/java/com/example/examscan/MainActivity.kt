@@ -41,7 +41,7 @@ class MainActivity:ComponentActivity(){
     override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);setContent{ExamScanTheme{ExamScanApp(vm)}}}
 }
 
-@Composable fun ExamScanTheme(content:@Composable()->Unit){MaterialTheme(colorScheme=lightColorScheme(primary=androidx.compose.ui.graphics.Color(0xFF166534),secondary=androidx.compose.ui.graphics.Color(0xFF2563EB),surfaceVariant=androidx.compose.ui.graphics.Color(0xFFF0FDF4)),content=content)}
+@Composable fun ExamScanTheme(content: @Composable () -> Unit){MaterialTheme(colorScheme=lightColorScheme(primary=androidx.compose.ui.graphics.Color(0xFF166534),secondary=androidx.compose.ui.graphics.Color(0xFF2563EB),surfaceVariant=androidx.compose.ui.graphics.Color(0xFFF0FDF4)),content=content)}
 
 @Composable fun ExamScanApp(vm:AppViewModel){
     val nav=rememberNavController()
