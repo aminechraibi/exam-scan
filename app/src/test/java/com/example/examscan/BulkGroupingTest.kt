@@ -13,7 +13,7 @@ class BulkGroupingTest {
     }
 
     @Test fun `empty scan creates no papers`() {
-        assertEquals(emptyList<List<Int>>(), ExamFileRules.groupPages(emptyList(), 2))
+        assertEquals(emptyList<List<Int>>(), ExamFileRules.groupPages(emptyList<Int>(), 2))
     }
 
     @Test fun `one page per paper creates one paper for every page`() {
