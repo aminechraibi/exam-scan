@@ -94,3 +94,9 @@ Exports are generated in cache and shared through a `FileProvider`.
 ## Privacy
 
 Scans stay in app-private local storage. The application requests no network permission. ML Kit's scanner implementation is supplied by Google Play services and may download its components dynamically.
+
+## Diagnostic logs for manual testing
+
+Open the gear icon on the home screen to enable opt-in diagnostics. Logging can be enabled separately for ML Kit, document quality, storage, sharing, lifecycle/reboot, and release-signing checks. Use **Record checkpoint** before or after a manual scenario, then **Share log** to export newline-delimited JSON for troubleshooting.
+
+Diagnostic logs are disabled by default, rotate at approximately 1 MB, and exclude exam names, scan images, file paths, and content URIs. The screen also provides a **Clear** action.

@@ -37,4 +37,11 @@ class ComposeSmokeTest {
         compose.onNodeWithTag("create_exam_button").assertIsDisplayed()
     }
 
+    @Test fun diagnosticsSettingsAreReachable() {
+        compose.onNodeWithTag("diagnostics_settings_button").performClick()
+        compose.onNodeWithText("Diagnostics").assertIsDisplayed()
+        compose.onNodeWithTag("diagnostics_master_switch").assertIsDisplayed()
+        compose.onNodeWithTag("share_diagnostics_button").assertIsNotEnabled()
+    }
+
 }

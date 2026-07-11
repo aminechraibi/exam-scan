@@ -5,6 +5,8 @@ import android.graphics.*
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.example.examscan.diagnostics.DiagnosticCategory
+import com.example.examscan.diagnostics.Diagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -32,6 +34,7 @@ class ExamRepository(
             uris.forEachIndexed { i,u -> savePage(examId,pid,n,i+1,u) }
             pid
         } catch (failure: Throwable) {
+            Diagnostics.log(DiagnosticCategory.STORAGE,"paper_import_rolled_back",mapOf("page_count" to uris.size),failure)
             File(context.filesDir,"scans/exam_$examId/paper_$n").deleteRecursively()
             papers.get(pid)?.let { papers.delete(it) }
             throw failure
@@ -48,6 +51,7 @@ class ExamRepository(
             papers.update(paper.copy(updatedAt=System.currentTimeMillis()))
             File(old.originalPath).delete(); File(old.labeledPath).delete()
         } catch (failure: Throwable) {
+            Diagnostics.log(DiagnosticCategory.STORAGE,"retake_rolled_back",error=failure)
             File(pair.first).delete(); File(pair.second).delete()
             throw failure
         }
@@ -69,6 +73,7 @@ class ExamRepository(
         try {
             pages.insert(PageEntity(paperId=paperId,pageNumber=pageNo,originalPath=pair.first,labeledPath=pair.second))
         } catch (failure: Throwable) {
+            Diagnostics.log(DiagnosticCategory.STORAGE,"page_database_insert_failed",error=failure)
             File(pair.first).delete(); File(pair.second).delete()
             throw failure
         }
@@ -83,6 +88,7 @@ class ExamRepository(
             labelBitmap(original,labeled,ExamFileRules.paperLabel(paperNo))
             return original.absolutePath to labeled.absolutePath
         } catch (failure: Throwable) {
+            Diagnostics.log(DiagnosticCategory.STORAGE,"image_write_failed",error=failure)
             original.delete(); labeled.delete()
             throw failure
         }
@@ -114,11 +120,11 @@ class ExamRepository(
             c.drawColor(Color.WHITE); c.drawBitmap(bm,null,RectF((1240-w)/2,(1754-h)/2,(1240+w)/2,(1754+h)/2),Paint(Paint.FILTER_BITMAP_FLAG)); doc.finishPage(page);bm.recycle()
         }}
         if(index==1){doc.close();error("Exam has no scanned pages")}
-        file.outputStream().use{doc.writeTo(it)};doc.close(); uri(file)
+        file.outputStream().use{doc.writeTo(it)};doc.close(); Diagnostics.log(DiagnosticCategory.STORAGE,"pdf_export_complete",mapOf("page_count" to index-1,"bytes" to file.length())); uri(file)
     }
     suspend fun exportImagesZip(examId:Long):Uri=withContext(Dispatchers.IO){
         val exam=exams.get(examId)?:error("Exam not found");val all=papers.getForExam(examId);val dir=File(context.cacheDir,"exports").apply{mkdirs()};val file=ExamFileRules.uniqueFile(dir,ExamFileRules.safeFileName(exam.name)+"_${exam.examDate}_images.zip")
-        ZipOutputStream(BufferedOutputStream(file.outputStream())).use{zip->all.forEach{pw->pw.pages.sortedBy{it.pageNumber}.forEach{p->val src=File(p.labeledPath);zip.putNextEntry(ZipEntry("Paper_%03d/Page_%02d.jpg".format(pw.paper.paperNumber,p.pageNumber)));src.inputStream().use{it.copyTo(zip)};zip.closeEntry()}}};uri(file)
+        ZipOutputStream(BufferedOutputStream(file.outputStream())).use{zip->all.forEach{pw->pw.pages.sortedBy{it.pageNumber}.forEach{p->val src=File(p.labeledPath);zip.putNextEntry(ZipEntry("Paper_%03d/Page_%02d.jpg".format(pw.paper.paperNumber,p.pageNumber)));src.inputStream().use{it.copyTo(zip)};zip.closeEntry()}}};Diagnostics.log(DiagnosticCategory.STORAGE,"zip_export_complete",mapOf("image_count" to all.sumOf{it.pages.size},"bytes" to file.length()));uri(file)
     }
     private fun uri(file:File)=FileProvider.getUriForFile(context,"${context.packageName}.files",file)
     private fun deleteExamFiles(id:Long)=File(context.filesDir,"scans/exam_$id").deleteRecursively()
