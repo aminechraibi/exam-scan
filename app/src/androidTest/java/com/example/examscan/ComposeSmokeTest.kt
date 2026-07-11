@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasTestTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -41,6 +43,7 @@ class ComposeSmokeTest {
         compose.onNodeWithTag("diagnostics_settings_button").performClick()
         compose.onNodeWithText("Diagnostics").assertIsDisplayed()
         compose.onNodeWithTag("diagnostics_master_switch").assertIsDisplayed()
+        compose.onNodeWithTag("diagnostics_list").performScrollToNode(hasTestTag("share_diagnostics_button"))
         compose.onNodeWithTag("share_diagnostics_button").assertIsNotEnabled()
     }
 
