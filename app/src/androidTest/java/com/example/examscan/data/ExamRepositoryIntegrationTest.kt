@@ -88,6 +88,24 @@ class ExamRepositoryIntegrationTest {
         assertEquals(1, db.pageDao().getForPaper(paperId).size)
     }
 
+    @Test fun capturedPageCanBeRotatedCroppedAndFilteredWithoutChangingOriginal() = runBlocking {
+        val examId = repository.createExam("Edit", "2026-07-11", 1)
+        val paperId = repository.addSinglePaper(examId, imageUris(1, "editable"))
+        val page = db.pageDao().getForPaper(paperId).single()
+        val originalBytes = File(page.originalPath).readBytes()
+        val beforeBytes = File(page.labeledPath).readBytes()
+        repository.applyPageEdits(page.id, 90, "GRAYSCALE", 10)
+        assertArrayEquals(originalBytes, File(page.originalPath).readBytes())
+        assertFalse(beforeBytes.contentEquals(File(page.labeledPath).readBytes()))
+        val edited = BitmapFactory.decodeFile(page.labeledPath)
+        assertEquals(384, edited.width)
+        assertEquals(256, edited.height)
+        val pixel = edited.getPixel(edited.width / 2, edited.height / 2)
+        assertTrue(kotlin.math.abs(Color.red(pixel) - Color.green(pixel)) <= 2)
+        assertTrue(kotlin.math.abs(Color.green(pixel) - Color.blue(pixel)) <= 2)
+        edited.recycle()
+    }
+
     @Test fun deleteInsertAndRetakeKeepPositionsAndCleanOldFiles() = runBlocking {
         val examId = repository.createExam("Physics", "2026-07-11", 3)
         val paperId = repository.addSinglePaper(examId, imageUris(3))

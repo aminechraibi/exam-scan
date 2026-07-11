@@ -2,6 +2,8 @@ package com.example.examscan.data
 
 import android.content.Context
 import android.graphics.*
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import androidx.core.content.FileProvider
@@ -83,6 +85,22 @@ class ExamRepository(
         val paper=papers.get(page.paperId)?:return@withContext
         File(page.originalPath).delete(); File(page.labeledPath).delete(); pages.delete(page)
         pages.getForPaper(page.paperId).forEachIndexed{i,p-> pages.update(p.copy(pageNumber=i+1))}; relabelPaper(paper)
+    }
+    suspend fun applyPageEdits(pageId:Long,rotation:Int,filter:String,cropPercent:Int)=withContext(Dispatchers.IO){
+        val page=pages.get(pageId)?:error("Page not found");val paper=papers.get(page.paperId)?:error("Paper not found")
+        val source=BitmapFactory.decodeFile(page.originalPath)?:error("Cannot decode original scan")
+        var working=source
+        try{
+            if(rotation%360!=0){val matrix=Matrix().apply{postRotate(rotation.toFloat())};working=Bitmap.createBitmap(working,0,0,working.width,working.height,matrix,true).also{if(working!==source)working.recycle()}}
+            val crop=cropPercent.coerceIn(0,25)
+            if(crop>0){val dx=working.width*crop/100;val dy=working.height*crop/100;working=Bitmap.createBitmap(working,dx,dy,working.width-2*dx,working.height-2*dy).also{previous->if(working!==source&&working!==previous)working.recycle()}}
+            val filtered=Bitmap.createBitmap(working.width,working.height,Bitmap.Config.ARGB_8888);val canvas=Canvas(filtered);val paint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            when(filter){"GRAYSCALE"->paint.colorFilter=ColorMatrixColorFilter(ColorMatrix().apply{setSaturation(0f)});"HIGH_CONTRAST"->paint.colorFilter=ColorMatrixColorFilter(ColorMatrix(floatArrayOf(1.5f,0f,0f,0f,-64f,0f,1.5f,0f,0f,-64f,0f,0f,1.5f,0f,-64f,0f,0f,0f,1f,0f)))}
+            canvas.drawBitmap(working,0f,0f,paint)
+            val temp=File(page.labeledPath+".edit.tmp.jpg");temp.outputStream().use{filtered.compress(Bitmap.CompressFormat.JPEG,95,it)};filtered.recycle()
+            labelBitmap(temp,File(page.labeledPath),ExamFileRules.paperLabel(paper.paperNumber));temp.delete();papers.update(paper.copy(updatedAt=System.currentTimeMillis()))
+            Diagnostics.log(DiagnosticCategory.DOCUMENT_QUALITY,"page_edit_applied",mapOf("rotation" to rotation,"filter" to filter,"crop_percent" to crop))
+        }finally{if(working!==source&&!working.isRecycled)working.recycle();if(!source.isRecycled)source.recycle()}
     }
     private suspend fun savePage(examId:Long,paperId:Long,paperNo:Int,pageNo:Int,uri:Uri){
         val pair=copyAndLabel(uri,examId,paperNo,pageNo)

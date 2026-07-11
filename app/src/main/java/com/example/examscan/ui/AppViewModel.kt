@@ -25,6 +25,7 @@ class AppViewModel(app:Application):AndroidViewModel(app){
     fun replace(pageId:Long,uri:Uri)=viewModelScope.launch{repo.replacePage(pageId,uri)}
     fun insert(paperId:Long,after:Int,uri:Uri)=viewModelScope.launch{repo.insertPage(paperId,after,uri)}
     fun deletePage(page:PageEntity)=viewModelScope.launch{repo.deletePage(page)}
+    fun applyEdits(pageId:Long,rotation:Int,filter:String,crop:Int,done:()->Unit={},failed:(Throwable)->Unit={})=viewModelScope.launch{try{repo.applyPageEdits(pageId,rotation,filter,crop);done()}catch(t:Throwable){Diagnostics.log(DiagnosticCategory.RUNTIME,"page_edit_failed",error=t);failed(t)}}
     suspend fun exportPdf(id:Long)=repo.exportPdf(id)
     suspend fun exportZip(id:Long)=repo.exportImagesZip(id)
 }
