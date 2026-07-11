@@ -28,17 +28,29 @@ class ExamRepository(
 
     suspend fun addSinglePaper(examId:Long, uris:List<Uri>): Long = withContext(Dispatchers.IO) {
         val n=papers.nextNumber(examId); val pid=papers.insert(PaperEntity(examId=examId,paperNumber=n))
-        uris.forEachIndexed { i,u -> savePage(examId,pid,n,i+1,u) }; pid
+        try {
+            uris.forEachIndexed { i,u -> savePage(examId,pid,n,i+1,u) }
+            pid
+        } catch (failure: Throwable) {
+            File(context.filesDir,"scans/exam_$examId/paper_$n").deleteRecursively()
+            papers.get(pid)?.let { papers.delete(it) }
+            throw failure
+        }
     }
     suspend fun addBulk(examId:Long, pagesPerPaper:Int, uris:List<Uri>): List<Long> = withContext(Dispatchers.IO) {
         val ids=mutableListOf<Long>(); ExamFileRules.groupPages(uris,pagesPerPaper).forEach { group -> ids += addSinglePaper(examId,group) }; ids
     }
     suspend fun replacePage(pageId:Long, uri:Uri)=withContext(Dispatchers.IO){
         val old=pages.get(pageId)?:return@withContext; val paper=papers.get(old.paperId)?:return@withContext
-        File(old.originalPath).delete(); File(old.labeledPath).delete()
         val pair=copyAndLabel(uri,paper.examId,paper.paperNumber,old.pageNumber)
-        pages.update(old.copy(originalPath=pair.first,labeledPath=pair.second,createdAt=System.currentTimeMillis()))
-        papers.update(paper.copy(updatedAt=System.currentTimeMillis()))
+        try {
+            pages.update(old.copy(originalPath=pair.first,labeledPath=pair.second,createdAt=System.currentTimeMillis()))
+            papers.update(paper.copy(updatedAt=System.currentTimeMillis()))
+            File(old.originalPath).delete(); File(old.labeledPath).delete()
+        } catch (failure: Throwable) {
+            File(pair.first).delete(); File(pair.second).delete()
+            throw failure
+        }
     }
     suspend fun insertPage(paperId:Long,afterPage:Int,uri:Uri)=withContext(Dispatchers.IO){
         val paper=papers.get(paperId)?:return@withContext
@@ -53,15 +65,27 @@ class ExamRepository(
         pages.getForPaper(page.paperId).forEachIndexed{i,p-> pages.update(p.copy(pageNumber=i+1))}; relabelPaper(paper)
     }
     private suspend fun savePage(examId:Long,paperId:Long,paperNo:Int,pageNo:Int,uri:Uri){
-        val pair=copyAndLabel(uri,examId,paperNo,pageNo); pages.insert(PageEntity(paperId=paperId,pageNumber=pageNo,originalPath=pair.first,labeledPath=pair.second))
+        val pair=copyAndLabel(uri,examId,paperNo,pageNo)
+        try {
+            pages.insert(PageEntity(paperId=paperId,pageNumber=pageNo,originalPath=pair.first,labeledPath=pair.second))
+        } catch (failure: Throwable) {
+            File(pair.first).delete(); File(pair.second).delete()
+            throw failure
+        }
     }
     private fun copyAndLabel(uri:Uri,examId:Long,paperNo:Int,pageNo:Int):Pair<String,String>{
         val dir=File(context.filesDir,"scans/exam_$examId/paper_$paperNo").apply{mkdirs()}
         val token=System.currentTimeMillis(); val original=File(dir,"page_${pageNo}_${token}_original.jpg")
-        context.contentResolver.openInputStream(uri)!!.use{input->original.outputStream().use{input.copyTo(it)}}
         val labeled=File(dir,"page_${pageNo}_${token}_labeled.jpg")
-        labelBitmap(original,labeled,ExamFileRules.paperLabel(paperNo))
-        return original.absolutePath to labeled.absolutePath
+        try {
+            val input = context.contentResolver.openInputStream(uri) ?: error("Cannot open scan")
+            input.use{source->original.outputStream().use{source.copyTo(it)}}
+            labelBitmap(original,labeled,ExamFileRules.paperLabel(paperNo))
+            return original.absolutePath to labeled.absolutePath
+        } catch (failure: Throwable) {
+            original.delete(); labeled.delete()
+            throw failure
+        }
     }
     private fun labelBitmap(input:File,output:File,label:String){
         val bitmap=BitmapFactory.decodeFile(input.absolutePath) ?: error("Cannot decode scan")

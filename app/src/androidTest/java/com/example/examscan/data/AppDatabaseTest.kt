@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -67,6 +68,14 @@ class AppDatabaseTest {
         }
         assertEquals(listOf(1, 2, 3), pages.getForPaper(paperIds.getValue(1)).map { it.pageNumber })
         assertEquals(listOf(1, 2, 3), papers.getForExam(examId).map { it.paper.paperNumber })
+    }
+
+    @Test fun observedPapersAreReturnedByNewestScanTime() = runBlocking {
+        val examId = exams.insert(ExamEntity(name = "Order", examDate = "2026-07-11", pagesPerPaper = 1))
+        papers.insert(PaperEntity(examId = examId, paperNumber = 1, createdAt = 100))
+        papers.insert(PaperEntity(examId = examId, paperNumber = 2, createdAt = 300))
+        papers.insert(PaperEntity(examId = examId, paperNumber = 3, createdAt = 200))
+        assertEquals(listOf(2, 3, 1), papers.observeForExam(examId).first().map { it.paper.paperNumber })
     }
 
     @Test fun closingAndReopeningDatabasePreservesData() = runBlocking {

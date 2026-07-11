@@ -1,14 +1,20 @@
 package com.example.examscan
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.Assert.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class ComposeSmokeTest {
@@ -19,5 +25,28 @@ class ComposeSmokeTest {
         compose.onNodeWithText("Create exam").assertIsDisplayed()
         compose.onNodeWithText("Exam name").assertIsDisplayed()
         compose.onNodeWithText("Pages per paper").assertIsDisplayed()
+        compose.onNodeWithTag("confirm_create_exam_button").assertIsNotEnabled()
+        compose.onNodeWithTag("exam_name_input").performTextInput("Math")
+        compose.onNodeWithTag("confirm_create_exam_button").assertIsEnabled()
+        compose.onNodeWithTag("pages_per_paper_input").performTextClearance().performTextInput("0")
+        compose.onNodeWithTag("confirm_create_exam_button").assertIsNotEnabled()
+    }
+
+    @Test fun homeScreenSurvivesActivityRecreation() {
+        compose.onNodeWithTag("create_exam_button").assertIsDisplayed()
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithTag("create_exam_button").assertIsDisplayed()
+    }
+
+    @Test fun deleteConfirmationCanBeCancelledOrConfirmed() {
+        var deletes = 0
+        compose.setContent { ExamScanTheme { ConfirmDeleteButton("Delete test") { deletes++ } } }
+        compose.onNodeWithContentDescription("Delete test").performClick()
+        compose.onNodeWithText("Confirm deletion").assertIsDisplayed()
+        compose.onNodeWithTag("cancel_delete_button").performClick()
+        assertEquals(0, deletes)
+        compose.onNodeWithContentDescription("Delete test").performClick()
+        compose.onNodeWithTag("confirm_delete_button").performClick()
+        compose.runOnIdle { assertEquals(1, deletes) }
     }
 }
