@@ -221,7 +221,10 @@ class ExamRepositoryIntegrationTest {
         val page = db.pageDao().getForPaper(paperId).single()
         val original = BitmapFactory.decodeFile(page.originalPath)
         val labeledBefore = BitmapFactory.decodeFile(page.labeledPath)
-        assertTrue(Color.red(labeledBefore.getPixel(50, 50)) < Color.red(original.getPixel(50, 50)))
+        val density = context.resources.displayMetrics.density
+        val labelX = (20 * density).toInt().coerceAtMost(labeledBefore.width - 1)
+        val labelY = (20 * density).toInt().coerceAtMost(labeledBefore.height - 1)
+        assertTrue(Color.red(labeledBefore.getPixel(labelX, labelY)) < Color.red(original.getPixel(labelX, labelY)))
         assertTrue(Color.red(labeledBefore.getPixel(300, 450)) > 230)
         val bytesBefore = File(page.labeledPath).readBytes()
         repository.insertPage(paperId, 1, solidImageUri(Color.LTGRAY, "second"))
@@ -235,7 +238,10 @@ class ExamRepositoryIntegrationTest {
         val paperId = repository.addSinglePaper(examId, listOf(solidImageUri(Color.WHITE, "paper25")))
         assertEquals(25, db.paperDao().get(paperId)?.paperNumber)
         val bitmap = BitmapFactory.decodeFile(db.pageDao().getForPaper(paperId).single().labeledPath)
-        assertTrue(Color.red(bitmap.getPixel(50, 50)) < 200)
+        val density = context.resources.displayMetrics.density
+        val labelX = (20 * density).toInt().coerceAtMost(bitmap.width - 1)
+        val labelY = (20 * density).toInt().coerceAtMost(bitmap.height - 1)
+        assertTrue(Color.red(bitmap.getPixel(labelX, labelY)) < 200)
         assertTrue(Color.red(bitmap.getPixel(bitmap.width - 5, bitmap.height - 5)) > 230)
         bitmap.recycle()
     }
