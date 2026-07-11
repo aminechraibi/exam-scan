@@ -28,7 +28,8 @@ class ComposeSmokeTest {
         compose.onNodeWithTag("confirm_create_exam_button").assertIsNotEnabled()
         compose.onNodeWithTag("exam_name_input").performTextInput("Math")
         compose.onNodeWithTag("confirm_create_exam_button").assertIsEnabled()
-        compose.onNodeWithTag("pages_per_paper_input").performTextClearance().performTextInput("0")
+        compose.onNodeWithTag("pages_per_paper_input").performTextClearance()
+        compose.onNodeWithTag("pages_per_paper_input").performTextInput("0")
         compose.onNodeWithTag("confirm_create_exam_button").assertIsNotEnabled()
     }
 
