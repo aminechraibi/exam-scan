@@ -31,7 +31,6 @@ jobs:
   emulator-tests:
     runs-on: ubuntu-latest
     env:
-      EXAMSCAN_KEYSTORE_FILE: ${{ runner.temp }}/examscan-release.jks
       EXAMSCAN_KEYSTORE_PASSWORD: ${{ secrets.EXAMSCAN_KEYSTORE_PASSWORD }}
       EXAMSCAN_KEY_ALIAS: ${{ secrets.EXAMSCAN_KEY_ALIAS }}
       EXAMSCAN_KEY_PASSWORD: ${{ secrets.EXAMSCAN_KEY_PASSWORD }}
@@ -53,7 +52,8 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.EXAMSCAN_KEYSTORE_BASE64 }}
         run: |
           test -n "$KEYSTORE_BASE64"
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$EXAMSCAN_KEYSTORE_FILE"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/examscan-release.jks"
+          echo "EXAMSCAN_KEYSTORE_FILE=$RUNNER_TEMP/examscan-release.jks" >> "$GITHUB_ENV"
       - name: Room and device tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
